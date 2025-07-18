@@ -147,7 +147,9 @@ def nn_forward_pass(params: Dict[str, torch.Tensor], X: torch.Tensor):
     # shape (N, C).                                                            #
     ############################################################################
     # Replace "pass" statement with your code
-    pass
+    hidden_before_ReLU = X.mm(W1) + b1
+    hidden = torch.maximum(hidden_before_ReLU, torch.zeros_like(hidden_before_ReLU))
+    scores = torch.mm(hidden, W2) + b2
     ###########################################################################
     #                             END OF YOUR CODE                            #
     ###########################################################################
@@ -212,7 +214,13 @@ def nn_forward_backward(
     # (Check Numeric Stability in http://cs231n.github.io/linear-classify/).   #
     ############################################################################
     # Replace "pass" statement with your code
-    pass
+    max_scores = torch.max(scores, dim=1, keepdim=True)[0]
+    scores -= max_scores
+    scores_sum = torch.sum(torch.exp(scores), dim=1, keepdim=True)
+    probs_scores = torch.exp(scores) / scores_sum
+    correct_logprobs = -torch.log(probs_scores[torch.arange(N), y])
+    loss = correct_logprobs.mean() + reg * (torch.sum(W1 * W1) + torch.sum(W2 * W2))
+
     ###########################################################################
     #                             END OF YOUR CODE                            #
     ###########################################################################
@@ -226,7 +234,21 @@ def nn_forward_backward(
     # tensor of same size                                                     #
     ###########################################################################
     # Replace "pass" statement with your code
-    pass
+    dZ2 = probs_scores.clone()
+    dZ2[torch.arange(N), y] -= 1
+    # FC layer2
+    db2 = dZ2.sum(dim=0) / N
+    dW2 = h1.t().mm(dZ2) / N + 2 * reg * W2
+    dH = dZ2.mm(W2.t())
+    # FC layer1
+    Z1 = X.mm(W1) + b1
+    dZ1 = dH * (Z1 > 0).float()
+    db1 = dZ1.sum(dim=0) / N
+    dW1 = X.t().mm(dZ1) / N + 2 * reg * W1
+    grads["W1"] = dW1
+    grads["b1"] = db1
+    grads["W2"] = dW2
+    grads["b2"] = db2
     ###########################################################################
     #                             END OF YOUR CODE                            #
     ###########################################################################
@@ -307,7 +329,10 @@ def nn_train(
         # stored in the grads dictionary defined above.                         #
         #########################################################################
         # Replace "pass" statement with your code
-        pass
+        params["W1"] -= learning_rate * grads["W1"]
+        params["b1"] -= learning_rate * grads["b1"]
+        params["W2"] -= learning_rate * grads["W2"]
+        params["b2"] -= learning_rate * grads["b2"]
         #########################################################################
         #                             END OF YOUR CODE                          #
         #########################################################################
@@ -365,7 +390,8 @@ def nn_predict(
     # TODO: Implement this function; it should be VERY simple!                #
     ###########################################################################
     # Replace "pass" statement with your code
-    pass
+    scores = nn_forward_pass(params, X)[0]
+    y_pred = torch.argmax(scores, dim=1)
     ###########################################################################
     #                              END OF YOUR CODE                           #
     ###########################################################################
@@ -399,7 +425,10 @@ def nn_get_search_params():
     # classifier.                                                             #
     ###########################################################################
     # Replace "pass" statement with your code
-    pass
+    learning_rates = [0.5, 1.0, 2.0]  # 重点围绕 1.0 及附近
+    hidden_sizes = [64, 128, 256]     # 128 在你的实验中表现不错
+    regularization_strengths = [0, 1e-5, 1e-3, 1e-1]  # 0~1e-3 表现较好，1e-1可做对比
+    learning_rate_decays = [0.95, 0.98, 1.0]          # 0.95/0.98/1.0 都可以尝试
     ###########################################################################
     #                           END OF YOUR CODE                              #
     ###########################################################################
@@ -460,7 +489,43 @@ def find_best_net(
     # automatically like we did on the previous exercises.                      #
     #############################################################################
     # Replace "pass" statement with your code
-    pass
+        # 获取所有超参数组合
+    learning_rates, hidden_sizes, regularization_strengths, learning_rate_decays = get_param_set_fn()
+    num_iters = 3000
+    batch_size = 1000
+
+    for lr in learning_rates:
+        for hs in hidden_sizes:
+            for reg in regularization_strengths:
+                for decay in learning_rate_decays:
+                    # 固定随机种子保证公平
+                    torch.manual_seed(0)
+                    net = TwoLayerNet(
+                        input_size=data_dict['X_train'].shape[1],
+                        hidden_size=hs,
+                        output_size=10,
+                        dtype=data_dict['X_train'].dtype,
+                        device=data_dict['X_train'].device
+                    )
+                    stat = net.train(
+                        data_dict['X_train'], data_dict['y_train'],
+                        data_dict['X_val'], data_dict['y_val'],
+                        learning_rate=lr,
+                        learning_rate_decay=decay,
+                        reg=reg,
+                        num_iters=num_iters,
+                        batch_size=batch_size,
+                        verbose=False
+                    )
+                    y_val_pred = net.predict(data_dict['X_val'])
+                    val_acc = (y_val_pred == data_dict['y_val']).float().mean().item()
+                    if val_acc > best_val_acc:
+                        best_val_acc = val_acc
+                        best_net = net
+                        best_stat = stat
+                    # 可选：打印当前组合及准确率
+                    # print(f"lr={lr}, hs={hs}, reg={reg}, decay={decay}, val_acc={val_acc:.4f}")
+
     #############################################################################
     #                               END OF YOUR CODE                            #
     #############################################################################
